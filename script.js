@@ -1,5 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
 
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
   // 1. NAVBAR scroll effect
   const navbar = document.getElementById('navbar');
   window.addEventListener('scroll', () => {
@@ -34,16 +36,20 @@ document.addEventListener('DOMContentLoaded', () => {
       if (entry.isIntersecting) {
         const siblings = Array.from(entry.target.parentNode.children);
         const delay = Math.min(siblings.indexOf(entry.target) * 80, 500);
-        setTimeout(() => entry.target.classList.add('visible'), delay);
+        if (reduceMotion) {
+          entry.target.classList.add('visible');
+        } else {
+          setTimeout(() => entry.target.classList.add('visible'), delay);
+        }
         revealObserver.unobserve(entry.target);
       }
     });
   }, { threshold: 0.12, rootMargin: '0px 0px -60px 0px' });
   revealEls.forEach(el => revealObserver.observe(el));
 
-  // 4. PARALLAX hero bg text
+  // 4. Subtle hero parallax (disabled when reduced motion is preferred)
   const heroBgText = document.querySelector('.hero-bg-text');
-  if (heroBgText) {
+  if (heroBgText && !reduceMotion) {
     window.addEventListener('scroll', () => {
       const scrollY = window.scrollY;
       const heroHeight = document.querySelector('.hero').offsetHeight;
@@ -64,22 +70,110 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 6. CATALOGUE 3D tilt
-  document.querySelectorAll('.catalogue-item').forEach(item => {
-    item.addEventListener('mousemove', (e) => {
-      const rect = item.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / rect.width - 0.5;
-      const y = (e.clientY - rect.top) / rect.height - 0.5;
-      item.style.transform = `perspective(800px) rotateY(${x * 6}deg) rotateX(${-y * 4}deg) scale(1.02)`;
-      item.style.transition = 'transform 0.1s ease';
-    });
-    item.addEventListener('mouseleave', () => {
-      item.style.transform = '';
-      item.style.transition = 'transform 0.6s ease, opacity 0.7s ease';
-    });
-  });
 
-  // 7. MARQUEE pause on hover
+  // 7. REACH OUT FORM — FormSubmit AJAX
+  const reachOutForm = document.getElementById('reachOutForm');
+  const reachOutSubmit = document.getElementById('reachOutSubmit');
+  const reachOutStatus = document.getElementById('reachOutStatus');
+
+  if (reachOutForm && reachOutSubmit && reachOutStatus) {
+    const emailField = document.getElementById('reachOutEmail');
+    const messageField = document.getElementById('reachOutMessage');
+    const submitLabel = reachOutSubmit.querySelector('.reach-out-submit-label');
+
+    const setFormStatus = (message, state = '') => {
+      reachOutStatus.textContent = message;
+      if (state) {
+        reachOutStatus.dataset.state = state;
+      } else {
+        delete reachOutStatus.dataset.state;
+      }
+    };
+
+    const validateField = (field) => {
+      const valid = field.checkValidity();
+      field.setAttribute('aria-invalid', String(!valid));
+      return valid;
+    };
+
+    [emailField, messageField].forEach((field) => {
+      field.addEventListener('input', () => {
+        if (field.getAttribute('aria-invalid') === 'true' && field.checkValidity()) {
+          field.setAttribute('aria-invalid', 'false');
+        }
+      });
+    });
+
+    reachOutForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const emailValid = validateField(emailField);
+      const messageValid = validateField(messageField);
+
+      if (!emailValid || !messageValid) {
+        setFormStatus('Please enter a valid email address and your message.', 'error');
+        reachOutForm.querySelector('[aria-invalid="true"]')?.focus();
+        return;
+      }
+
+      if (reachOutSubmit.disabled) return;
+
+      reachOutSubmit.disabled = true;
+      reachOutForm.setAttribute('aria-busy', 'true');
+      submitLabel.textContent = 'SENDING…';
+      setFormStatus('Sending your message securely…');
+
+      try {
+        const standardEndpoint = reachOutForm.action;
+        const ajaxEndpoint = standardEndpoint.replace(
+          'https://formsubmit.co/',
+          'https://formsubmit.co/ajax/'
+        );
+
+        const payload = Object.fromEntries(new FormData(reachOutForm).entries());
+        const response = await fetch(ajaxEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        let result;
+        try {
+          result = await response.json();
+        } catch {
+          throw new Error('The form service returned an unexpected response. Please try again.');
+        }
+
+        if (!response.ok || result.success === false || result.error) {
+          throw new Error(
+            result.message ||
+            result.error?.message ||
+            'Your message could not be sent. Please try again in a moment.'
+          );
+        }
+
+        reachOutForm.reset();
+        [emailField, messageField].forEach((field) => field.setAttribute('aria-invalid', 'false'));
+        setFormStatus('Thank you — your message has been submitted. We’ll be in touch soon.', 'success');
+      } catch (error) {
+        setFormStatus(
+          error instanceof TypeError
+            ? 'We couldn’t connect to the form service. Please check your connection and try again.'
+            : (error.message || 'Something went wrong. Please try again.'),
+          'error'
+        );
+      } finally {
+        reachOutSubmit.disabled = false;
+        reachOutForm.removeAttribute('aria-busy');
+        submitLabel.textContent = 'SEND MESSAGE';
+      }
+    });
+  }
+
+  // 6. MARQUEE pause on hover
   const marqueeTrack = document.querySelector('.marquee-track');
   if (marqueeTrack) {
     marqueeTrack.addEventListener('mouseenter', () => marqueeTrack.style.animationPlayState = 'paused');
